@@ -289,8 +289,28 @@ def log_run(mlflow, name, best, res, features, tr, te, artifacts, params, regist
         model = res[best]['model']
         pred = model.predict_proba(X)[:, 1] if name == 'pd' else model.predict(X)
         sig = infer_signature(X, pred)
-        mlflow.sklearn.log_model(sk_model=model, name=f'{name}_model', signature=sig, input_example=X,
-                                 registered_model_name=(f'{name}_model' if register else None))
+        log_sklearn_model(mlflow, model, name, sig, X, register)
+
+
+def log_sklearn_model(mlflow, model, name, sig, X, register):
+    """Логирует sklearn-модель. Новые версии MLflow сохраняют модели через skops и требуют
+    явно перечислить «доверенные» типы — добавляем их по сообщению об ошибке и повторяем."""
+    import inspect, re
+    from mlflow.exceptions import MlflowException
+    kw = dict(sk_model=model, name=f'{name}_model', signature=sig, input_example=X,
+              registered_model_name=(f'{name}_model' if register else None))
+    supports_skops = 'skops_trusted_types' in inspect.signature(mlflow.sklearn.log_model).parameters
+    trusted = ['numpy.dtype']
+    for _ in range(5):
+        try:
+            return mlflow.sklearn.log_model(**kw, **({'skops_trusted_types': trusted} if supports_skops else {}))
+        except MlflowException as e:
+            found = re.search(r'Untrusted types found in the file: \[(.*?)\]', str(e))
+            if not (supports_skops and found):
+                raise
+            trusted = sorted(set(trusted) | {t.strip(" '\"") for t in found.group(1).split(',')})
+            print('Добавляю доверенные типы:', trusted)
+    raise RuntimeError('Не удалось сохранить модель: слишком много недоверенных типов')
 
 
 # ------------------------------------------------------------------ main
