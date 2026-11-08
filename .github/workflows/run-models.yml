@@ -1,0 +1,43 @@
+name: run-models
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      log_to_dagshub:
+        description: "Залогировать модели в MLflow на DagsHub"
+        type: boolean
+        default: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Train models (no logging)
+        if: ${{ !inputs.log_to_dagshub }}
+        run: python src/credit_models.py --no-mlflow
+
+      - name: Train models and log to DagsHub
+        if: ${{ inputs.log_to_dagshub }}
+        env:
+          DAGSHUB_USER: ${{ secrets.DAGSHUB_USER }}
+          DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+        run: python src/credit_models.py
+
+      - name: Save charts and metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-outputs
+          path: outputs/
